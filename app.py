@@ -1,12 +1,9 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import random
 import re
 import time
 import json
-from streamlit_local_storage import LocalStorage
-
-# LocalStorage 객체 생성
-local_storage = LocalStorage()
 
 # Custom CSS로 글자 크기 축소
 st.markdown("""
@@ -59,23 +56,22 @@ def get_options_for_item(correct_item):
     random.shuffle(options)
     return options
 
-# 2. 브라우저 LocalStorage에서 데이터 복원 (최초 1회 실행)
-saved_idx = local_storage.getItem("quiz_current_idx")
-saved_wrong = local_storage.getItem("quiz_wrong_notes")
+# 2. 브라우저 LocalStorage 복원 및 URL sync 처리
+params = st.query_params
 
 if 'wrong_notes' not in st.session_state:
-    if saved_wrong:
+    if "wn" in params:
         try:
-            st.session_state.wrong_notes = json.loads(saved_wrong)
+            st.session_state.wrong_notes = json.loads(params["wn"])
         except Exception:
             st.session_state.wrong_notes = []
     else:
         st.session_state.wrong_notes = []
 
 if 'current_idx' not in st.session_state:
-    if saved_idx is not None:
+    if "idx" in params:
         try:
-            st.session_state.current_idx = int(saved_idx)
+            st.session_state.current_idx = int(params["idx"])
         except Exception:
             st.session_state.current_idx = 0
     else:
@@ -89,10 +85,41 @@ if 'shuffled_list' not in st.session_state:
 if 'options_dict' not in st.session_state:
     st.session_state.options_dict = {}
 
-# 동기화 함수
-def sync_to_browser():
-    local_storage.setItem("quiz_current_idx", str(st.session_state.current_idx))
-    local_storage.setItem("quiz_wrong_notes", json.dumps(st.session_state.wrong_notes, ensure_ascii=False))
+# 최초 진입 시 URL에 값이 없다면 LocalStorage에서 가져와 URL 파라미터로 붙여주는 브라우저 스크립트
+if "idx" not in params and "init" not in st.session_state:
+    st.session_state.init = True
+    init_js = """
+    <script>
+        const savedData = localStorage.getItem("idiom_quiz_state");
+        if (savedData) {
+            try {
+                const parsed = JSON.parse(savedData);
+                const url = new URL(window.parent.location.href);
+                url.searchParams.set("idx", parsed.current_idx || 0);
+                url.searchParams.set("wn", JSON.stringify(parsed.wrong_notes || []));
+                window.parent.location.href = url.href;
+            } catch(e) {}
+        }
+    </script>
+    """
+    components.html(init_js, height=0, width=0)
+
+def sync_state():
+    """상태 변경 시 URL과 LocalStorage를 동시에 갱신"""
+    st.query_params["idx"] = str(st.session_state.current_idx)
+    st.query_params["wn"] = json.dumps(st.session_state.wrong_notes, ensure_ascii=False)
+    
+    data_to_save = {
+        "current_idx": st.session_state.current_idx,
+        "wrong_notes": st.session_state.wrong_notes
+    }
+    json_str = json.dumps(data_to_save, ensure_ascii=False)
+    save_js = f"""
+    <script>
+        localStorage.setItem("idiom_quiz_state", JSON.stringify({json_str}));
+    </script>
+    """
+    components.html(save_js, height=0, width=0)
 
 # 3. 사이드바 메뉴
 st.sidebar.title("⚙️ 퀴즈 및 오답노트 설정")
@@ -106,8 +133,13 @@ st.sidebar.write("---")
 if st.sidebar.button("🔄 진행도 & 오답노트 초기화"):
     st.session_state.wrong_notes = []
     st.session_state.current_idx = 0
-    local_storage.deleteItem("quiz_current_idx")
-    local_storage.deleteItem("quiz_wrong_notes")
+    st.query_params.clear()
+    clear_js = """
+    <script>
+        localStorage.removeItem("idiom_quiz_state");
+    </script>
+    """
+    components.html(clear_js, height=0, width=0)
     st.sidebar.success("학습 진행도와 오답노트가 모두 초기화되었습니다.")
     st.rerun()
 
@@ -119,14 +151,14 @@ def go_next_question():
         st.session_state.current_idx += 1
     else:
         st.session_state.current_idx = 0
-    sync_to_browser()
+    sync_state()
 
 def go_prev_question():
     if st.session_state.current_idx > 0:
         st.session_state.current_idx -= 1
     else:
         st.session_state.current_idx = len(active_list) - 1
-    sync_to_browser()
+    sync_state()
 
 # --- 메인 화면 ---
 st.markdown('<p class="main-title">🏯 사자성어 퀴즈 앱</p>', unsafe_allow_html=True)
@@ -166,7 +198,7 @@ else:
                 if test_target == "전체 문제 테스트" and current not in st.session_state.wrong_notes:
                     st.session_state.wrong_notes.append(current)
             
-            sync_to_browser()
+            sync_state()
             time.sleep(1.2)
             go_next_question()
             st.rerun()
@@ -187,7 +219,7 @@ else:
                 if test_target == "전체 문제 테스트" and current not in st.session_state.wrong_notes:
                     st.session_state.wrong_notes.append(current)
             
-            sync_to_browser()
+            sync_state()
             time.sleep(1.2)
             go_next_question()
             st.rerun()

@@ -5,7 +5,7 @@ import time
 import json
 import extra_streamlit_components as stx
 
-# Custom CSS로 글자 크기 축소
+# Custom CSS로 글자 크기 축소 (약 70% 수준)
 st.markdown("""
     <style>
     .main-title { font-size: 1.8rem !important; font-weight: 700; margin-bottom: 0.5rem; }
@@ -13,12 +13,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 브라우저 LocalStorage 쿠키 관리자 생성
-@st.cache_resource
-def get_cookie_manager():
-    return stx.CookieManager()
-
-cookie_manager = get_cookie_manager()
+# 브라우저 쿠키 관리자 생성 (@st.cache_resource 제거)
+cookie_manager = stx.CookieManager()
 
 # 1. 사자성어 데이터 불러오기
 @st.cache_data

@@ -1,9 +1,9 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import random
 import re
 import time
 import json
-from streamlit_javascript import st_javascript
 
 # Custom CSS로 글자 크기 축소
 st.markdown("""
@@ -49,37 +49,7 @@ if not all_idioms:
     st.error("⚠️ 'Four-Character_Idiom.txt' 파일에서 단어를 불러오지 못했습니다.")
     st.stop()
 
-# 2. LocalStorage 읽기/쓰기 함수
-def get_local_storage(key):
-    cmd = f'localStorage.getItem("{key}");'
-    return st_javascript(cmd)
-
-def set_local_storage(key, value):
-    json_val = json.dumps(value, ensure_ascii=False)
-    cmd = f'localStorage.setItem("{key}", JSON.stringify({json_val}));'
-    st_javascript(cmd)
-
-def remove_local_storage(key):
-    cmd = f'localStorage.removeItem("{key}");'
-    st_javascript(cmd)
-
-# 최초 접속 시 LocalStorage 데이터 복원
-if 'data_loaded' not in st.session_state:
-    saved_state = get_local_storage("idiom_quiz_state")
-    if saved_state is not None:
-        if isinstance(saved_state, str) and saved_state != "":
-            try:
-                parsed = json.loads(saved_state)
-                st.session_state.wrong_notes = parsed.get("wrong_notes", [])
-                st.session_state.current_idx = parsed.get("current_idx", 0)
-            except Exception:
-                st.session_state.wrong_notes = []
-                st.session_state.current_idx = 0
-        else:
-            st.session_state.wrong_notes = []
-            st.session_state.current_idx = 0
-        st.session_state.data_loaded = True
-
+# 세션 상태 기본값 선언
 if 'wrong_notes' not in st.session_state:
     st.session_state.wrong_notes = []
 
@@ -91,12 +61,30 @@ if 'shuffled_list' not in st.session_state:
     random.shuffle(shuffled)
     st.session_state.shuffled_list = shuffled
 
-def sync_state():
+if 'options_dict' not in st.session_state:
+    st.session_state.options_dict = {}
+
+# LocalStorage 동기화 함수
+def save_to_browser():
     data = {
         "wrong_notes": st.session_state.wrong_notes,
         "current_idx": st.session_state.current_idx
     }
-    set_local_storage("idiom_quiz_state", data)
+    json_str = json.dumps(data, ensure_ascii=False)
+    js_code = f"""
+    <script>
+        localStorage.setItem("idiom_quiz_state", JSON.stringify({json_str}));
+    </script>
+    """
+    components.html(js_code, height=0, width=0)
+
+def clear_browser():
+    js_code = """
+    <script>
+        localStorage.removeItem("idiom_quiz_state");
+    </script>
+    """
+    components.html(js_code, height=0, width=0)
 
 def get_options_for_item(correct_item):
     other_idioms = [item['idiom'] for item in all_idioms if item['idiom'] != correct_item['idiom']]
@@ -104,9 +92,6 @@ def get_options_for_item(correct_item):
     options = wrong_options + [correct_item['idiom']]
     random.shuffle(options)
     return options
-
-if 'options_dict' not in st.session_state:
-    st.session_state.options_dict = {}
 
 # 3. 사이드바 메뉴
 st.sidebar.title("⚙️ 퀴즈 및 오답노트 설정")
@@ -120,8 +105,8 @@ st.sidebar.write("---")
 if st.sidebar.button("🔄 진행도 & 오답노트 초기화"):
     st.session_state.wrong_notes = []
     st.session_state.current_idx = 0
-    remove_local_storage("idiom_quiz_state")
-    st.sidebar.success("학습 진행도와 오답노트가 모두 초기화되었습니다.")
+    clear_browser()
+    st.sidebar.success("학습 진행도와 오답노트가 초기화되었습니다.")
     st.rerun()
 
 # 4. 테스트 목록 추출
@@ -132,14 +117,14 @@ def go_next_question():
         st.session_state.current_idx += 1
     else:
         st.session_state.current_idx = 0
-    sync_state()
+    save_to_browser()
 
 def go_prev_question():
     if st.session_state.current_idx > 0:
         st.session_state.current_idx -= 1
     else:
         st.session_state.current_idx = len(active_list) - 1
-    sync_state()
+    save_to_browser()
 
 # --- 메인 화면 ---
 st.markdown('<p class="main-title">🏯 사자성어 퀴즈 앱</p>', unsafe_allow_html=True)
@@ -179,7 +164,7 @@ else:
                 if test_target == "전체 문제 테스트" and current not in st.session_state.wrong_notes:
                     st.session_state.wrong_notes.append(current)
             
-            sync_state()
+            save_to_browser()
             time.sleep(1.2)
             go_next_question()
             st.rerun()
@@ -200,7 +185,7 @@ else:
                 if test_target == "전체 문제 테스트" and current not in st.session_state.wrong_notes:
                     st.session_state.wrong_notes.append(current)
             
-            sync_state()
+            save_to_browser()
             time.sleep(1.2)
             go_next_question()
             st.rerun()

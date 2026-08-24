@@ -153,7 +153,29 @@ test_target = st.sidebar.radio("테스트 대상 선택", ["전체 문제 테스
 quiz_type = st.sidebar.radio("문제 유형 선택", ["객관식 (4지선다)", "주관식"], key="quiz_type_radio")
 
 st.sidebar.write("---")
-if st.sidebar.button("🔄 진행도 & 통계 완전 초기화"):
+st.sidebar.subheader("🔄 초기화 옵션")
+
+# 1) 진도만 초기화 (통계 유지)
+if st.sidebar.button("🔄 문제 진도만 초기화"):
+    shuffled = all_idioms.copy()
+    random.shuffle(shuffled)
+    st.session_state.shuffled_list = shuffled
+    st.session_state.options_dict = {item['idiom']: generate_options_for_item(item) for item in all_idioms}
+    st.session_state.wrong_notes = []
+    st.session_state.current_idx = 0
+    save_to_db()
+    st.sidebar.success(f"[{user_id}] 님의 문제 진도 및 오답노트가 초기화되었습니다. (학습 통계는 유지됨)")
+    st.rerun()
+
+# 2) 통계만 초기화
+if st.sidebar.button("🧹 학습 통계만 초기화"):
+    st.session_state.idiom_stats = {}
+    save_to_db()
+    st.sidebar.success(f"[{user_id}] 님의 누적 학습 통계가 초기화되었습니다.")
+    st.rerun()
+
+# 3) 전체 완전 초기화
+if st.sidebar.button("⚠️ 전체 완전 초기화"):
     shuffled = all_idioms.copy()
     random.shuffle(shuffled)
     st.session_state.shuffled_list = shuffled
@@ -162,11 +184,11 @@ if st.sidebar.button("🔄 진행도 & 통계 완전 초기화"):
     st.session_state.current_idx = 0
     st.session_state.idiom_stats = {}
     save_to_db()
-    st.sidebar.success(f"[{user_id}] 님의 데이터가 초기화되었습니다.")
+    st.sidebar.success(f"[{user_id}] 님의 모든 데이터가 완전 초기화되었습니다.")
     st.rerun()
 
 # 5. 메인 화면 (탭 구성)
-tab1, tab2 = st.tabs(["🏯 퀴즈 풀기", "📊 학습 통계 및 복습"])
+tab1, tab2 = st.tabs(["🏯 퀴즈 풀기", "📊 학습 통계"])
 
 # --- TAB 1: 퀴즈 풀기 ---
 with tab1:
@@ -265,13 +287,13 @@ with tab1:
 
 # --- TAB 2: 학습 통계 ---
 with tab2:
-    st.markdown('<p class="main-title">📊 개별 학습 통계 분석</p>', unsafe_allow_html=True)
-    st.caption(f"🔑 **{user_id}** 님의 학습 누적 데이터입니다.")
+    st.markdown('<p class="main-title">📊 학습 통계</p>', unsafe_allow_html=True)
+    st.caption(f"🔑 **{user_id}** 님의 누적 학습 분석 데이터입니다.")
     
     stats_data = st.session_state.get("idiom_stats", {})
     
     if not stats_data:
-        st.info("💡 아직 풀이 이력이 없습니다. 퀴즈를 풀면 통계 데이터가 누적됩니다!")
+        st.info("💡 아직 누적된 학습 기록이 없습니다. 퀴즈를 풀면 통계 데이터가 자동으로 저장됩니다!")
     else:
         # 요약 지표 계산
         total_attempts = sum(v["attempts"] for v in stats_data.values())
@@ -309,19 +331,19 @@ with tab2:
             
         df = pd.DataFrame(rows)
         
-        # 취약 사자성어 (최소 1회 이상 풀었고 정답률이 낮거나 오답 수가 많은 순)
+        # 취약 사자성어 TOP 10
         weak_df = df[df["풀이 횟수"] > 0].sort_values(by=["오답", "정답률(%)"], ascending=[False, True]).head(10)
         
         st.subheader("🔥 집중 복습이 필요한 취약 사자성어 TOP 10")
         if not weak_df.empty and weak_df["오답"].sum() > 0:
             st.dataframe(weak_df[["사자성어", "뜻", "풀이 횟수", "오답", "정답률(%)"]], use_container_width=True, hide_index=True)
         else:
-            st.success("👏 오답이 누적된 취약 단어가 없습니다. 매우 잘하고 계십니다!")
+            st.success("👏 오답이 누적된 취약 단어가 없습니다. 매우 훌륭합니다!")
             
         st.write("---")
-        st.subheader("📚 전체 사자성어 학습 현황 표")
+        st.subheader("📚 전체 사자성어 누적 현황")
         
-        # 검색 및 필터링
+        # 검색 기능
         search_kw = st.text_input("🔍 사자성어 또는 뜻 검색", "")
         if search_kw:
             filtered_df = df[df["사자성어"].str.contains(search_kw) | df["뜻"].str.contains(search_kw)]

@@ -44,96 +44,91 @@ if not all_idioms:
 
 # 2. 세션 상태 초기화
 if 'wrong_notes' not in st.session_state:
-    st.session_state.wrong_notes = []  # 틀린 문제 리스트
+    st.session_state.wrong_notes = []
 
-if 'quiz_queue' not in st.session_state or not st.session_state.quiz_queue:
+if 'current_idx' not in st.session_state:
+    st.session_state.current_idx = 0
+
+if 'shuffled_list' not in st.session_state:
     shuffled = all_idioms.copy()
     random.shuffle(shuffled)
-    st.session_state.quiz_queue = shuffled
-
-if 'wrong_queue' not in st.session_state:
-    st.session_state.wrong_queue = []
-
-if 'current_question' not in st.session_state:
-    st.session_state.current_question = st.session_state.quiz_queue.pop()
+    st.session_state.shuffled_list = shuffled
 
 # 보기(4지선다) 생성 함수
-def generate_options(correct_item):
+def get_options_for_item(correct_item):
     other_idioms = [item['idiom'] for item in all_idioms if item['idiom'] != correct_item['idiom']]
     wrong_options = random.sample(other_idioms, k=min(3, len(other_idioms)))
     options = wrong_options + [correct_item['idiom']]
     random.shuffle(options)
     return options
 
-if 'current_options' not in st.session_state:
-    st.session_state.current_options = generate_options(st.session_state.current_question)
+# 보기 캐싱
+if 'options_dict' not in st.session_state:
+    st.session_state.options_dict = {}
 
-# 3. 사이드바 메뉴 구성
+# 3. 사이드바 메뉴
 st.sidebar.title("⚙️ 퀴즈 및 오답노트 설정")
 st.sidebar.write(f"📊 전체 사자성어: **{len(all_idioms)}개**")
 st.sidebar.write(f"📝 저장된 오답: **{len(st.session_state.wrong_notes)}개**")
 
-test_target = st.sidebar.radio("테스트 대상 선택", ["전체 문제 테스트", "오답노트 테스트"])
-quiz_type = st.sidebar.radio("문제 유형 선택", ["객관식 (4지선다)", "주관식"])
+test_target = st.sidebar.radio("테스트 대상 선택", ["전체 문제 테스트", "오답노트 테스트"], key="test_target_radio")
+quiz_type = st.sidebar.radio("문제 유형 선택", ["객관식 (4지선다)", "주관식"], key="quiz_type_radio")
 
 st.sidebar.write("---")
 if st.sidebar.button("🗑️ 오답노트 초기화"):
     st.session_state.wrong_notes = []
-    st.session_state.wrong_queue = []
     st.sidebar.success("오답노트가 초기화되었습니다.")
     st.rerun()
 
-# 4. 문제 갱신 함수
-def next_question(target_mode):
-    if target_mode == "전체 문제 테스트":
-        if not st.session_state.quiz_queue:
-            shuffled = all_idioms.copy()
-            random.shuffle(shuffled)
-            st.session_state.quiz_queue = shuffled
-        st.session_state.current_question = st.session_state.quiz_queue.pop()
-    else:  # 오답노트 테스트
-        if not st.session_state.wrong_queue and st.session_state.wrong_notes:
-            st.session_state.wrong_queue = st.session_state.wrong_notes.copy()
-            random.shuffle(st.session_state.wrong_queue)
-        
-        if st.session_state.wrong_queue:
-            st.session_state.current_question = st.session_state.wrong_queue.pop()
-
-    st.session_state.current_options = generate_options(st.session_state.current_question)
+# 4. 테스트 목록 추출
+active_list = st.session_state.shuffled_list if test_target == "전체 문제 테스트" else st.session_state.wrong_notes
 
 # --- 메인 화면 ---
 st.title("🏯 사자성어 퀴즈 앱")
 
-# 오답노트 모드 선택 시 오답이 없는 경우 예외 처리
-if test_target == "오답노트 테스트" and not st.session_state.wrong_notes:
+if test_target == "오답노트 테스트" and not active_list:
     st.info("🎉 저장된 오답이 없습니다! '전체 문제 테스트'에서 틀린 문제가 생기면 이곳에 자동으로 추가됩니다.")
 else:
-    current = st.session_state.current_question
+    # 인덱스 범위 초과 방지
+    if st.session_state.current_idx >= len(active_list):
+        st.session_state.current_idx = 0
+
+    current = active_list[st.session_state.current_idx]
     
-    st.caption(f"📌 현재 모드: **{test_target}** | **{quiz_type}**")
+    st.caption(f"📌 모드: **{test_target}** | **{quiz_type}** | 문제 번호: **{st.session_state.current_idx + 1} / {len(active_list)}**")
     st.subheader(f"문제: {current['meaning']}")
     st.write("---")
 
-    # 객관식 / 주관식 분기 처리
+    # 객관식 / 주관식 문제 출제 및 자동 채점
     if quiz_type == "객관식 (4지선다)":
-        selected_option = st.radio("알맞은 사자성어를 선택하세요:", st.session_state.current_options, key="radio_choice")
+        if current['idiom'] not in st.session_state.options_dict:
+            st.session_state.options_dict[current['idiom']] = get_options_for_item(current)
         
-        if st.button("정답 확인"):
+        options = st.session_state.options_dict[current['idiom']]
+        selected_option = st.radio(
+            "알맞은 사자성어를 선택하세요:", 
+            options, 
+            index=None, 
+            key=f"radio_{test_target}_{st.session_state.current_idx}"
+        )
+        
+        if selected_option:
             if selected_option == current['idiom']:
                 st.success("🎉 정답입니다!")
-                # 오답노트 모드에서 정답을 맞추면 오답노트에서 제거
                 if test_target == "오답노트 테스트" and current in st.session_state.wrong_notes:
                     st.session_state.wrong_notes.remove(current)
             else:
                 st.error(f"❌ 틀렸습니다. 정답은 [{current['idiom']}] 입니다.")
-                # 전체 문제 모드에서 틀리면 오답노트에 추가
                 if test_target == "전체 문제 테스트" and current not in st.session_state.wrong_notes:
                     st.session_state.wrong_notes.append(current)
 
     else:  # 주관식
-        user_answer = st.text_input("정답(사자성어)을 입력하세요:", key="user_input")
+        user_answer = st.text_input(
+            "정답(사자성어)을 입력 후 Enter를 누르세요:", 
+            key=f"text_{test_target}_{st.session_state.current_idx}"
+        )
         
-        if st.button("정답 확인"):
+        if user_answer.strip():
             if user_answer.strip() == current['idiom']:
                 st.success("🎉 정답입니다!")
                 if test_target == "오답노트 테스트" and current in st.session_state.wrong_notes:
@@ -144,7 +139,21 @@ else:
                     st.session_state.wrong_notes.append(current)
 
     st.write("")
-    if st.button("다음 문제 ➡️"):
-        next_question(test_target)
-        st.rerun()
-        
+    # 이동 버튼 (이전 / 다음)
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("⬅️ 이전 문제"):
+            if st.session_state.current_idx > 0:
+                st.session_state.current_idx -= 1
+            else:
+                st.session_state.current_idx = len(active_list) - 1
+            st.rerun()
+
+    with col2:
+        if st.button("다음 문제 ➡️"):
+            if st.session_state.current_idx < len(active_list) - 1:
+                st.session_state.current_idx += 1
+            else:
+                st.session_state.current_idx = 0
+            st.rerun()
+            

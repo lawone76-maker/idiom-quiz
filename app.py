@@ -2,10 +2,9 @@ import streamlit as st
 import random
 import re
 import time
-import json
 from supabase import create_client, Client
 
-# --- Supabase 설정 ---
+# --- Supabase 접속 설정 ---
 SUPABASE_URL = "https://vstetskytidhvqeyxyyi.supabase.co"
 SUPABASE_KEY = "sb_publishable_WwjtW2g3-5dHGKOAbXbBNw_2dL5ZU-G"
 
@@ -15,7 +14,7 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# Custom CSS
+# UI 스타일 설정
 st.markdown("""
     <style>
     .main-title { font-size: 1.8rem !important; font-weight: 700; margin-bottom: 0.5rem; }
@@ -23,7 +22,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 1. 사자성어 원본 데이터 불러오기
+# 1. 데이터 로드 및 보기 생성 함수
 @st.cache_data
 def load_data():
     idioms = []
@@ -56,10 +55,9 @@ def load_data():
 all_idioms = load_data()
 
 if not all_idioms:
-    st.error("⚠️ 'Four-Character_Idiom.txt' 파일에서 단어를 불러오지 못했습니다.")
+    st.error("⚠️ 'Four-Character_Idiom.txt' 파일을 찾을 수 없거나 데이터가 비어있습니다.")
     st.stop()
 
-# 고정 보기 생성 함수
 def generate_options_for_item(correct_item):
     other_idioms = [item['idiom'] for item in all_idioms if item['idiom'] != correct_item['idiom']]
     wrong_options = random.sample(other_idioms, k=min(3, len(other_idioms)))
@@ -67,10 +65,23 @@ def generate_options_for_item(correct_item):
     random.shuffle(options)
     return options
 
-user_id = "default_user"
+# 2. 사이드바: 사용자 ID 입력 기능 추가
+st.sidebar.title("👤 사용자 관리")
+user_input_id = st.sidebar.text_input(
+    "사용자 ID (닉네임)", 
+    value="default_user", 
+    help="본인 ID를 입력하고 Enter를 누르면 내 학습 데이터를 불러옵니다."
+)
 
-# 2. DB에서 학습 진행 상황 및 문제 순서 불러오기
-if "db_loaded" not in st.session_state:
+# ID가 변경되었을 때 데이터 재로드 처리
+if "current_user_id" not in st.session_state or st.session_state.current_user_id != user_input_id:
+    st.session_state.current_user_id = user_input_id
+    st.session_state.db_loaded = False
+
+user_id = st.session_state.current_user_id
+
+# 3. DB 데이터 동기화
+if not st.session_state.get("db_loaded", False):
     try:
         res = supabase.table("user_progress").select("*").eq("user_id", user_id).execute()
         if res.data and "shuffled_list" in res.data[0] and res.data[0]["shuffled_list"]:
@@ -79,7 +90,6 @@ if "db_loaded" not in st.session_state:
             st.session_state.shuffled_list = res.data[0].get("shuffled_list", [])
             st.session_state.options_dict = res.data[0].get("options_dict", {})
         else:
-            # 최초 실행 시 문제 순서 및 보기 생성 후 저장
             shuffled = all_idioms.copy()
             random.shuffle(shuffled)
             st.session_state.shuffled_list = shuffled
@@ -95,7 +105,6 @@ if "db_loaded" not in st.session_state:
                 "options_dict": st.session_state.options_dict
             }).execute()
     except Exception:
-        # DB 읽기 실패 시 세션 폴백
         shuffled = all_idioms.copy()
         random.shuffle(shuffled)
         st.session_state.shuffled_list = shuffled
@@ -105,7 +114,6 @@ if "db_loaded" not in st.session_state:
     
     st.session_state.db_loaded = True
 
-# DB 동기화 함수
 def save_to_db():
     try:
         supabase.table("user_progress").upsert({
@@ -118,7 +126,8 @@ def save_to_db():
     except Exception:
         pass
 
-# 3. 사이드바 메뉴
+# 4. 사이드바 메뉴
+st.sidebar.write("---")
 st.sidebar.title("⚙️ 퀴즈 및 오답노트 설정")
 st.sidebar.write(f"📊 전체 사자성어: **{len(all_idioms)}개**")
 st.sidebar.write(f"📝 저장된 오답: **{len(st.session_state.wrong_notes)}개**")
@@ -135,10 +144,10 @@ if st.sidebar.button("🔄 진행도 & 순서 완전 초기화"):
     st.session_state.wrong_notes = []
     st.session_state.current_idx = 0
     save_to_db()
-    st.sidebar.success("학습 진행도와 문제 순서가 모두 새롭게 초기화되었습니다.")
+    st.sidebar.success(f"[{user_id}] 님의 학습 진행도와 문제 순서가 초기화되었습니다.")
     st.rerun()
 
-# 4. 테스트 목록 추출
+# 5. 메인 퀴즈 화면
 active_list = st.session_state.shuffled_list if test_target == "전체 문제 테스트" else st.session_state.wrong_notes
 
 def go_next_question():
@@ -155,7 +164,6 @@ def go_prev_question():
         st.session_state.current_idx = len(active_list) - 1
     save_to_db()
 
-# --- 메인 화면 ---
 st.markdown('<p class="main-title">🏯 사자성어 퀴즈 앱</p>', unsafe_allow_html=True)
 
 if test_target == "오답노트 테스트" and not active_list:
@@ -166,18 +174,17 @@ else:
 
     current = active_list[st.session_state.current_idx]
     
-    st.caption(f"📌 모드: **{test_target}** | **{quiz_type}** | 현재 진행: **{st.session_state.current_idx + 1} / {len(active_list)}번째 문제**")
+    st.caption(f"🔑 현재 사용자: **{user_id}** | 모드: **{test_target}** | **{quiz_type}** | 진행: **{st.session_state.current_idx + 1} / {len(active_list)}번째**")
     st.markdown(f'<p class="question-title">문제: {current["meaning"]}</p>', unsafe_allow_html=True)
     st.write("---")
 
-    # 객관식 / 주관식 문제 출제
     if quiz_type == "객관식 (4지선다)":
         options = st.session_state.options_dict.get(current['idiom'], generate_options_for_item(current))
         selected_option = st.radio(
             "알맞은 사자성어를 선택하세요:", 
             options, 
             index=None, 
-            key=f"radio_{test_target}_{st.session_state.current_idx}"
+            key=f"radio_{user_id}_{test_target}_{st.session_state.current_idx}"
         )
         
         if selected_option:
@@ -195,10 +202,10 @@ else:
             go_next_question()
             st.rerun()
 
-    else:  # 주관식
+    else:
         user_answer = st.text_input(
             "정답(사자성어)을 입력 후 Enter를 누르세요:", 
-            key=f"text_{test_target}_{st.session_state.current_idx}"
+            key=f"text_{user_id}_{test_target}_{st.session_state.current_idx}"
         )
         
         if user_answer.strip():

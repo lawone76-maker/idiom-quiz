@@ -1,6 +1,24 @@
 import streamlit as st
 import random
 import re
+import time
+
+# Custom CSS로 글자 크기 약 70% 수준으로 축소
+st.markdown("""
+    <style>
+    .main-title {
+        font-size: 1.8rem !important;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+    .question-title {
+        font-size: 1.25rem !important;
+        font-weight: 600;
+        margin-top: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # 1. 사자성어 데이터 불러오기
 @st.cache_data
@@ -62,7 +80,6 @@ def get_options_for_item(correct_item):
     random.shuffle(options)
     return options
 
-# 보기 캐싱
 if 'options_dict' not in st.session_state:
     st.session_state.options_dict = {}
 
@@ -83,23 +100,34 @@ if st.sidebar.button("🗑️ 오답노트 초기화"):
 # 4. 테스트 목록 추출
 active_list = st.session_state.shuffled_list if test_target == "전체 문제 테스트" else st.session_state.wrong_notes
 
+def go_next_question():
+    if st.session_state.current_idx < len(active_list) - 1:
+        st.session_state.current_idx += 1
+    else:
+        st.session_state.current_idx = 0
+
+def go_prev_question():
+    if st.session_state.current_idx > 0:
+        st.session_state.current_idx -= 1
+    else:
+        st.session_state.current_idx = len(active_list) - 1
+
 # --- 메인 화면 ---
-st.title("🏯 사자성어 퀴즈 앱")
+st.markdown('<p class="main-title">🏯 사자성어 퀴즈 앱</p>', unsafe_allow_html=True)
 
 if test_target == "오답노트 테스트" and not active_list:
     st.info("🎉 저장된 오답이 없습니다! '전체 문제 테스트'에서 틀린 문제가 생기면 이곳에 자동으로 추가됩니다.")
 else:
-    # 인덱스 범위 초과 방지
     if st.session_state.current_idx >= len(active_list):
         st.session_state.current_idx = 0
 
     current = active_list[st.session_state.current_idx]
     
     st.caption(f"📌 모드: **{test_target}** | **{quiz_type}** | 문제 번호: **{st.session_state.current_idx + 1} / {len(active_list)}**")
-    st.subheader(f"문제: {current['meaning']}")
+    st.markdown(f'<p class="question-title">문제: {current["meaning"]}</p>', unsafe_allow_html=True)
     st.write("---")
 
-    # 객관식 / 주관식 문제 출제 및 자동 채점
+    # 객관식 / 주관식 문제 출제 및 자동 전환
     if quiz_type == "객관식 (4지선다)":
         if current['idiom'] not in st.session_state.options_dict:
             st.session_state.options_dict[current['idiom']] = get_options_for_item(current)
@@ -121,6 +149,11 @@ else:
                 st.error(f"❌ 틀렸습니다. 정답은 [{current['idiom']}] 입니다.")
                 if test_target == "전체 문제 테스트" and current not in st.session_state.wrong_notes:
                     st.session_state.wrong_notes.append(current)
+            
+            # 정답/오답 확인 피드백 후 1.2초 대기하여 다음 문제로 자동 이동
+            time.sleep(1.2)
+            go_next_question()
+            st.rerun()
 
     else:  # 주관식
         user_answer = st.text_input(
@@ -137,23 +170,21 @@ else:
                 st.error(f"❌ 틀렸습니다. 정답은 [{current['idiom']}] 입니다.")
                 if test_target == "전체 문제 테스트" and current not in st.session_state.wrong_notes:
                     st.session_state.wrong_notes.append(current)
+            
+            time.sleep(1.2)
+            go_next_question()
+            st.rerun()
 
     st.write("")
-    # 이동 버튼 (이전 / 다음)
+    # 수동 수동 이동 버튼 (이전 / 다음)
     col1, col2 = st.columns(2)
     with col1:
         if st.button("⬅️ 이전 문제"):
-            if st.session_state.current_idx > 0:
-                st.session_state.current_idx -= 1
-            else:
-                st.session_state.current_idx = len(active_list) - 1
+            go_prev_question()
             st.rerun()
 
     with col2:
         if st.button("다음 문제 ➡️"):
-            if st.session_state.current_idx < len(active_list) - 1:
-                st.session_state.current_idx += 1
-            else:
-                st.session_state.current_idx = 0
+            go_next_question()
             st.rerun()
             

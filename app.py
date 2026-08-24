@@ -3,6 +3,10 @@ import random
 import re
 import time
 import json
+from streamlit_local_storage import LocalStorage
+
+# LocalStorage 객체 생성
+local_storage = LocalStorage()
 
 # Custom CSS로 글자 크기 축소
 st.markdown("""
@@ -48,7 +52,6 @@ if not all_idioms:
     st.error("⚠️ 'Four-Character_Idiom.txt' 파일에서 단어를 불러오지 못했습니다.")
     st.stop()
 
-# 2. 보기 생성 함수 (호출부보다 먼저 선언)
 def get_options_for_item(correct_item):
     other_idioms = [item['idiom'] for item in all_idioms if item['idiom'] != correct_item['idiom']]
     wrong_options = random.sample(other_idioms, k=min(3, len(other_idioms)))
@@ -56,22 +59,23 @@ def get_options_for_item(correct_item):
     random.shuffle(options)
     return options
 
-# 3. URL Query Params 기반 상태 복원 및 저장
-params = st.query_params
+# 2. 브라우저 LocalStorage에서 데이터 복원 (최초 1회 실행)
+saved_idx = local_storage.getItem("quiz_current_idx")
+saved_wrong = local_storage.getItem("quiz_wrong_notes")
 
 if 'wrong_notes' not in st.session_state:
-    if "wn" in params:
+    if saved_wrong:
         try:
-            st.session_state.wrong_notes = json.loads(params["wn"])
+            st.session_state.wrong_notes = json.loads(saved_wrong)
         except Exception:
             st.session_state.wrong_notes = []
     else:
         st.session_state.wrong_notes = []
 
 if 'current_idx' not in st.session_state:
-    if "idx" in params:
+    if saved_idx is not None:
         try:
-            st.session_state.current_idx = int(params["idx"])
+            st.session_state.current_idx = int(saved_idx)
         except Exception:
             st.session_state.current_idx = 0
     else:
@@ -85,15 +89,12 @@ if 'shuffled_list' not in st.session_state:
 if 'options_dict' not in st.session_state:
     st.session_state.options_dict = {}
 
-def sync_url():
-    """현재 상태를 URL 파라미터에 실시간 반영"""
-    st.query_params["idx"] = str(st.session_state.current_idx)
-    st.query_params["wn"] = json.dumps(st.session_state.wrong_notes, ensure_ascii=False)
+# 동기화 함수
+def sync_to_browser():
+    local_storage.setItem("quiz_current_idx", str(st.session_state.current_idx))
+    local_storage.setItem("quiz_wrong_notes", json.dumps(st.session_state.wrong_notes, ensure_ascii=False))
 
-# 최초 실행 시 URL 동기화
-sync_url()
-
-# 4. 사이드바 메뉴
+# 3. 사이드바 메뉴
 st.sidebar.title("⚙️ 퀴즈 및 오답노트 설정")
 st.sidebar.write(f"📊 전체 사자성어: **{len(all_idioms)}개**")
 st.sidebar.write(f"📝 저장된 오답: **{len(st.session_state.wrong_notes)}개**")
@@ -105,11 +106,12 @@ st.sidebar.write("---")
 if st.sidebar.button("🔄 진행도 & 오답노트 초기화"):
     st.session_state.wrong_notes = []
     st.session_state.current_idx = 0
-    st.query_params.clear()
+    local_storage.deleteItem("quiz_current_idx")
+    local_storage.deleteItem("quiz_wrong_notes")
     st.sidebar.success("학습 진행도와 오답노트가 모두 초기화되었습니다.")
     st.rerun()
 
-# 5. 테스트 목록 추출
+# 4. 테스트 목록 추출
 active_list = st.session_state.shuffled_list if test_target == "전체 문제 테스트" else st.session_state.wrong_notes
 
 def go_next_question():
@@ -117,14 +119,14 @@ def go_next_question():
         st.session_state.current_idx += 1
     else:
         st.session_state.current_idx = 0
-    sync_url()
+    sync_to_browser()
 
 def go_prev_question():
     if st.session_state.current_idx > 0:
         st.session_state.current_idx -= 1
     else:
         st.session_state.current_idx = len(active_list) - 1
-    sync_url()
+    sync_to_browser()
 
 # --- 메인 화면 ---
 st.markdown('<p class="main-title">🏯 사자성어 퀴즈 앱</p>', unsafe_allow_html=True)
@@ -164,7 +166,7 @@ else:
                 if test_target == "전체 문제 테스트" and current not in st.session_state.wrong_notes:
                     st.session_state.wrong_notes.append(current)
             
-            sync_url()
+            sync_to_browser()
             time.sleep(1.2)
             go_next_question()
             st.rerun()
@@ -185,7 +187,7 @@ else:
                 if test_target == "전체 문제 테스트" and current not in st.session_state.wrong_notes:
                     st.session_state.wrong_notes.append(current)
             
-            sync_url()
+            sync_to_browser()
             time.sleep(1.2)
             go_next_question()
             st.rerun()

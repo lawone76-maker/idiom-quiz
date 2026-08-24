@@ -5,9 +5,7 @@ import time
 import json
 from supabase import create_client, Client
 
-# ---------------------------------------------------------
-# Step 1에서 복사한 값으로 교체해 주세요.
-# ---------------------------------------------------------
+# --- Supabase 설정 ---
 SUPABASE_URL = "https://vstetskytidhvqeyxyyi.supabase.co"
 SUPABASE_KEY = "sb_publishable_WwjtW2g3-5dHGKOAbXbBNw_2dL5ZU-G"
 
@@ -25,7 +23,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 1. 사자성어 데이터 불러오기
+# 1. 사자성어 원본 데이터 불러오기
 @st.cache_data
 def load_data():
     idioms = []
@@ -61,44 +59,51 @@ if not all_idioms:
     st.error("⚠️ 'Four-Character_Idiom.txt' 파일에서 단어를 불러오지 못했습니다.")
     st.stop()
 
-def get_options_for_item(correct_item):
+# 고정 보기 생성 함수
+def generate_options_for_item(correct_item):
     other_idioms = [item['idiom'] for item in all_idioms if item['idiom'] != correct_item['idiom']]
     wrong_options = random.sample(other_idioms, k=min(3, len(other_idioms)))
     options = wrong_options + [correct_item['idiom']]
     random.shuffle(options)
     return options
 
-# 2. 고유 사용자 ID 관리 (기본 개인 계정 설정)
 user_id = "default_user"
 
-# 3. DB에서 학습 진행 상황 불러오기 (최초 1회)
+# 2. DB에서 학습 진행 상황 및 문제 순서 불러오기
 if "db_loaded" not in st.session_state:
     try:
         res = supabase.table("user_progress").select("*").eq("user_id", user_id).execute()
-        if res.data:
-            st.session_state.current_idx = res.data[0]["current_idx"]
-            st.session_state.wrong_notes = res.data[0]["wrong_notes"]
+        if res.data and "shuffled_list" in res.data[0] and res.data[0]["shuffled_list"]:
+            st.session_state.current_idx = res.data[0].get("current_idx", 0)
+            st.session_state.wrong_notes = res.data[0].get("wrong_notes", [])
+            st.session_state.shuffled_list = res.data[0].get("shuffled_list", [])
+            st.session_state.options_dict = res.data[0].get("options_dict", {})
         else:
+            # 최초 실행 시 문제 순서 및 보기 생성 후 저장
+            shuffled = all_idioms.copy()
+            random.shuffle(shuffled)
+            st.session_state.shuffled_list = shuffled
+            st.session_state.options_dict = {item['idiom']: generate_options_for_item(item) for item in all_idioms}
             st.session_state.current_idx = 0
             st.session_state.wrong_notes = []
-            supabase.table("user_progress").insert({
+            
+            supabase.table("user_progress").upsert({
                 "user_id": user_id,
                 "current_idx": 0,
-                "wrong_notes": []
+                "wrong_notes": [],
+                "shuffled_list": st.session_state.shuffled_list,
+                "options_dict": st.session_state.options_dict
             }).execute()
     except Exception:
+        # DB 읽기 실패 시 세션 폴백
+        shuffled = all_idioms.copy()
+        random.shuffle(shuffled)
+        st.session_state.shuffled_list = shuffled
+        st.session_state.options_dict = {item['idiom']: generate_options_for_item(item) for item in all_idioms}
         st.session_state.current_idx = 0
         st.session_state.wrong_notes = []
     
     st.session_state.db_loaded = True
-
-if 'shuffled_list' not in st.session_state:
-    shuffled = all_idioms.copy()
-    random.shuffle(shuffled)
-    st.session_state.shuffled_list = shuffled
-
-if 'options_dict' not in st.session_state:
-    st.session_state.options_dict = {}
 
 # DB 동기화 함수
 def save_to_db():
@@ -106,12 +111,14 @@ def save_to_db():
         supabase.table("user_progress").upsert({
             "user_id": user_id,
             "current_idx": st.session_state.current_idx,
-            "wrong_notes": st.session_state.wrong_notes
+            "wrong_notes": st.session_state.wrong_notes,
+            "shuffled_list": st.session_state.shuffled_list,
+            "options_dict": st.session_state.options_dict
         }).execute()
     except Exception:
         pass
 
-# 4. 사이드바 메뉴
+# 3. 사이드바 메뉴
 st.sidebar.title("⚙️ 퀴즈 및 오답노트 설정")
 st.sidebar.write(f"📊 전체 사자성어: **{len(all_idioms)}개**")
 st.sidebar.write(f"📝 저장된 오답: **{len(st.session_state.wrong_notes)}개**")
@@ -120,14 +127,18 @@ test_target = st.sidebar.radio("테스트 대상 선택", ["전체 문제 테스
 quiz_type = st.sidebar.radio("문제 유형 선택", ["객관식 (4지선다)", "주관식"], key="quiz_type_radio")
 
 st.sidebar.write("---")
-if st.sidebar.button("🔄 진행도 & 오답노트 초기화"):
+if st.sidebar.button("🔄 진행도 & 순서 완전 초기화"):
+    shuffled = all_idioms.copy()
+    random.shuffle(shuffled)
+    st.session_state.shuffled_list = shuffled
+    st.session_state.options_dict = {item['idiom']: generate_options_for_item(item) for item in all_idioms}
     st.session_state.wrong_notes = []
     st.session_state.current_idx = 0
     save_to_db()
-    st.sidebar.success("학습 진행도와 오답노트가 모두 초기화되었습니다.")
+    st.sidebar.success("학습 진행도와 문제 순서가 모두 새롭게 초기화되었습니다.")
     st.rerun()
 
-# 5. 테스트 목록 추출
+# 4. 테스트 목록 추출
 active_list = st.session_state.shuffled_list if test_target == "전체 문제 테스트" else st.session_state.wrong_notes
 
 def go_next_question():
@@ -161,10 +172,7 @@ else:
 
     # 객관식 / 주관식 문제 출제
     if quiz_type == "객관식 (4지선다)":
-        if current['idiom'] not in st.session_state.options_dict:
-            st.session_state.options_dict[current['idiom']] = get_options_for_item(current)
-        
-        options = st.session_state.options_dict[current['idiom']]
+        options = st.session_state.options_dict.get(current['idiom'], generate_options_for_item(current))
         selected_option = st.radio(
             "알맞은 사자성어를 선택하세요:", 
             options, 
